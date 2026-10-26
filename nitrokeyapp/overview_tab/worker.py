@@ -3,7 +3,7 @@ from hashlib import sha256
 from typing import Any
 
 from fido2.attestation.packed import PackedAttestation
-from fido2.client import DefaultClientDataCollector, Fido2Client, UserInteraction
+from fido2.client import DefaultClientDataCollector, Fido2Client, UserInteraction, WebAuthnClient
 from fido2.client.windows import WindowsClient
 from fido2.ctap2.pin import ClientPin
 from fido2.server import Fido2Server
@@ -140,7 +140,7 @@ class VerifyGenuine(Job):
 
         self.is_genuine.emit(genuine)
 
-    def _verify(self, transport: Transport = Transport.CTAPHID) -> bool:
+    def _verify(self, transport: Transport) -> bool:
         assert isinstance(self.data._device, TrussedDevice)
         get_pin = self._request_pin
         touch = self.common_ui.touch
@@ -161,13 +161,13 @@ class VerifyGenuine(Job):
         client_data_collector = DefaultClientDataCollector(origin="https://example.com")
         if transport == Transport.CTAPHID:
             assert isinstance(self.data._device.connection, CtapHidConnection)
-            fido2_client = Fido2Client(
+            fido2_client: WebAuthnClient = Fido2Client(
                 device=self.data._device.connection.device,
                 client_data_collector=client_data_collector,
                 user_interaction=Interaction(),
             )
         else:
-            fido2_client = WindowsClient(client_data_collector)  # type: ignore
+            fido2_client = WindowsClient(client_data_collector)
 
         firmware_version = self.data._device.admin.version()
         server = Fido2Server(

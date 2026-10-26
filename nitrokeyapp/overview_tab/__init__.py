@@ -27,7 +27,7 @@ class OverviewTab(QtUtilsMixIn, QWidget):
     trigger_update_file = Signal(DeviceData, str, bool)
     trigger_check_genuine = Signal(DeviceData)
 
-    def __init__(self, parent: QWidget | None = None) -> None:
+    def __init__(self, parent: QWidget) -> None:
         QWidget.__init__(self, parent)
         QtUtilsMixIn.__init__(self)
 
@@ -35,7 +35,6 @@ class OverviewTab(QtUtilsMixIn, QWidget):
         self.common_ui = CommonUi()
 
         self.worker_thread = QThread()
-        assert parent is not None
         self._worker = OverviewWorker(self.common_ui, parent)
         self._worker.moveToThread(self.worker_thread)
         self.worker_thread.start()
