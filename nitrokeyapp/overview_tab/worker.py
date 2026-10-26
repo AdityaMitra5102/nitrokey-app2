@@ -15,7 +15,8 @@ from fido2.webauthn import (
     PublicKeyCredentialUserEntity,
     UserVerificationRequirement,
 )
-from nitrokey.trussed import Fido2Certs, Transport
+from nitrokey.trussed import Fido2Certs, Transport, TrussedDevice
+from nitrokey.trussed._connection.ctaphid import CtapHidConnection
 from PySide6.QtCore import QEventLoop, Signal, Slot
 from PySide6.QtWidgets import QWidget
 
@@ -140,6 +141,7 @@ class VerifyGenuine(Job):
         self.is_genuine.emit(genuine)
 
     def _verify(self, transport: Transport = Transport.CTAPHID) -> bool:
+        assert isinstance(self.data._device, TrussedDevice)
         get_pin = self._request_pin
         touch = self.common_ui.touch
 
@@ -158,6 +160,7 @@ class VerifyGenuine(Job):
 
         client_data_collector = DefaultClientDataCollector(origin="https://example.com")
         if transport == Transport.CTAPHID:
+            assert isinstance(self.data._device.connection, CtapHidConnection)
             fido2_client = Fido2Client(
                 device=self.data._device.connection.device,
                 client_data_collector=client_data_collector,
