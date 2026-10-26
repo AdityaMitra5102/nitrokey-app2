@@ -25,6 +25,7 @@ class OverviewTab(QtUtilsMixIn, QWidget):
     # worker triggers
     trigger_update = Signal(DeviceData, bool)
     trigger_update_file = Signal(DeviceData, str, bool)
+    trigger_check_genuine = Signal(DeviceData)
 
     def __init__(self, parent: QWidget | None = None) -> None:
         QWidget.__init__(self, parent)
@@ -34,14 +35,17 @@ class OverviewTab(QtUtilsMixIn, QWidget):
         self.common_ui = CommonUi()
 
         self.worker_thread = QThread()
-        self._worker = OverviewWorker(self.common_ui)
+        assert parent is not None
+        self._worker = OverviewWorker(self.common_ui, parent)
         self._worker.moveToThread(self.worker_thread)
         self.worker_thread.start()
 
         self.trigger_update.connect(self._worker.update_device)
         self.trigger_update_file.connect(self._worker.update_device_file)
+        self.trigger_check_genuine.connect(self._worker.check_genuine)
 
         self._worker.device_updated.connect(self.device_updated)
+        self._worker.genuine_device.connect(self.genuine_result)
 
         # self.ui === self -> this tricks mypy due to monkey-patching self
         self.ui = self.load_ui("overview_tab.ui", self)
@@ -50,6 +54,7 @@ class OverviewTab(QtUtilsMixIn, QWidget):
 
         self.ui.btn_update_with_file.clicked.connect(self.update_with_file)
         self.ui.btn_update.clicked.connect(self.run_update)
+        self.ui.btn_check_genuine.clicked.connect(self.check_genuine)
 
         self.using_ccid = get_transport() == Transport.CCID
 
@@ -76,6 +81,8 @@ class OverviewTab(QtUtilsMixIn, QWidget):
             return
         self.reset()
         self.data = data
+        self.ui.btn_check_genuine.setStyleSheet("")
+        self.ui.btn_check_genuine.setText("Check Genuineness of Device")
 
         # catch too old firmware
         if data.is_too_old:
@@ -196,3 +203,26 @@ class OverviewTab(QtUtilsMixIn, QWidget):
             file = filenames[0]
 
             self.trigger_update_file.emit(self.data, file, self.is_qubesos)
+
+    @Slot()
+    def check_genuine(self) -> None:
+        assert self.data
+        self.trigger_check_genuine.emit(self.data)
+
+    @Slot(bool)
+    def genuine_result(self, result: bool) -> None:
+        result_button = self.ui.btn_check_genuine
+        if result:
+            result_button.setText("Verified Genuine")
+            result_button.setStyleSheet(
+                "background-color: rgba(115, 215, 125, 0.18);"
+                "border: 1px solid rgba(115, 215, 125, 0.5);"
+                "border-radius: 6px; color: rgb(115, 215, 125); font-weight: 600;"
+            )
+        else:
+            result_button.setText("Verification failed")
+            result_button.setStyleSheet(
+                "background-color: rgba(192, 57, 43, 0.18);"
+                "border: 1px solid rgba(192, 57, 43, 0.5);"
+                "border-radius: 6px; color: #ff8070; font-weight: 600;"
+            )
