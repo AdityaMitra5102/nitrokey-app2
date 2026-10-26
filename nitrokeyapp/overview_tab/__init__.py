@@ -82,7 +82,7 @@ class OverviewTab(QtUtilsMixIn, QWidget):
         self.reset()
         self.data = data
         self.ui.btn_check_genuine.setStyleSheet("")
-        self.ui.btn_check_genuine.setText("Check Genuineness of Device")
+        self.ui.btn_check_genuine.setText("Check for Authenticity")
 
         # catch too old firmware
         if data.is_too_old:
@@ -220,7 +220,7 @@ class OverviewTab(QtUtilsMixIn, QWidget):
                 "border-radius: 6px; color: rgb(115, 215, 125); font-weight: 600;"
             )
         else:
-            result_button.setText("Verification failed")
+            result_button.setText("Verification Failed")
             result_button.setStyleSheet(
                 "background-color: rgba(192, 57, 43, 0.18);"
                 "border: 1px solid rgba(192, 57, 43, 0.5);"
