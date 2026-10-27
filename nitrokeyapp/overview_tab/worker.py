@@ -1,11 +1,10 @@
 import logging
 from hashlib import sha256
-from typing import Any
+from typing import Any, Tuple
 
 from fido2.attestation.packed import PackedAttestation
 from fido2.client import DefaultClientDataCollector, Fido2Client, UserInteraction, WebAuthnClient
 from fido2.client.windows import WindowsClient
-from fido2.ctap2.pin import ClientPin
 from fido2.server import Fido2Server
 from fido2.webauthn import (
     AttestationConveyancePreference,
@@ -17,18 +16,19 @@ from fido2.webauthn import (
 )
 from nitrokey.trussed import Fido2Certs, Transport, TrussedDevice
 from nitrokey.trussed._connection.ctaphid import CtapHidConnection
-from PySide6.QtCore import QEventLoop, Signal, Slot
-from PySide6.QtWidgets import QWidget
+from PySide6.QtCore import Signal, Slot
 
 from nitrokeyapp.common_ui import CommonUi
 from nitrokeyapp.device_data import DeviceData
-from nitrokeyapp.fido2_tab.ui import Fido2PinUi, Fido2PinUiConnection
-from nitrokeyapp.fido2_tab.worker import PinCache
 from nitrokeyapp.update import UpdateGUI, UpdateResult
 from nitrokeyapp.utils import get_transport
 from nitrokeyapp.worker import Job, Worker
 
 logger = logging.getLogger(__name__)
+
+test_certs = [
+    "c7d87cac86b69059bbff5c43872a20892267518614dfc9822c7ee55ad89f0022"
+]  # Kept as a list so that we can add more test certs in future if needed
 
 
 class UpdateDevice(Job):
@@ -71,64 +71,13 @@ def verify_attestation(attestation_object: AttestationObject, client_data_hash: 
 
 
 class VerifyGenuine(Job):
-    is_genuine = Signal(bool)
+    is_genuine = Signal(bool, str)
 
-    def __init__(
-        self, common_ui: CommonUi, data: DeviceData, pin_cache: PinCache, pin_ui: Fido2PinUi
-    ) -> None:
+    def __init__(self, common_ui: CommonUi, data: DeviceData) -> None:
         super().__init__(common_ui)
         self.data = data
-        self.pin_cache = pin_cache
-        self.pin_ui = pin_ui
-        self._pin_ui_conn: Fido2PinUiConnection | None = None
 
         self.is_genuine.connect(lambda _: self.finished.emit())
-
-    def cleanup(self) -> None:
-        if self._pin_ui_conn is not None:
-            self._pin_ui_conn.disconnect()
-            self._pin_ui_conn = None
-
-    def _request_pin(self) -> str | None:
-        cached = self.pin_cache.get(self.data)
-        if cached is not None:
-            return cached
-
-        retries = self._get_pin_retries()
-        if retries is None:
-            self.trigger_error("FIDO2 PIN is not set on this device")
-            return None
-
-        loop = QEventLoop()
-        result: list[str | None] = [None]
-
-        def on_pin(pin: str) -> None:
-            result[0] = pin
-            loop.quit()
-
-        def on_cancel() -> None:
-            result[0] = None
-            loop.quit()
-
-        self._pin_ui_conn = self.pin_ui.connect_actions(on_pin, on_cancel)
-        self.pin_ui.query.emit(retries)
-        loop.exec()
-        self.cleanup()
-        pin = result[0]
-        if self.pin_cache.get(self.data) is None and pin:
-            self.pin_cache.update(self.data, pin)
-        return pin
-
-    def _get_pin_retries(self) -> int | None:
-        try:
-            with self.data.open_ctap2() as ctap2:
-                if not ctap2.info.options.get("clientPin"):
-                    return None
-                client_pin = ClientPin(ctap2)
-                return client_pin.get_pin_retries()[0]
-        except Exception as e:
-            logger.warning(f"failed to get fido2 pin retries: {e}")
-            return None
 
     def run(self) -> None:
         transport = get_transport()
@@ -138,22 +87,18 @@ class VerifyGenuine(Job):
             self.trigger_error(f"Failed to verify device genuineness: {e}")
             return
 
-        self.is_genuine.emit(genuine)
+        self.is_genuine.emit(genuine[0], genuine[1])
 
-    def _verify(self, transport: Transport) -> bool:
+    def _verify(self, transport: Transport) -> Tuple[bool, str]:
         assert isinstance(self.data._device, TrussedDevice)
-        get_pin = self._request_pin
         touch = self.common_ui.touch
 
         class Interaction(UserInteraction):
-            def __init__(self) -> None:
-                self._pin = None
-
             def prompt_up(self) -> None:
                 touch.start.emit()
 
             def request_pin(self, permissions: Any, rd_id: str | None) -> str | None:
-                return get_pin()
+                raise ValueError("UV was discouraged")
 
             def request_uv(self, permissions: Any, rd_id: str | None) -> bool:
                 return True
@@ -166,6 +111,10 @@ class VerifyGenuine(Job):
                 client_data_collector=client_data_collector,
                 user_interaction=Interaction(),
             )
+            assert isinstance(fido2_client, Fido2Client)
+            if not (fido2_client._backend.info.options.get("makeCredUvNotRqd", False)):
+                return False, "Please update firmware to continue"
+
         else:
             fido2_client = WindowsClient(client_data_collector)
 
@@ -186,30 +135,42 @@ class VerifyGenuine(Job):
             user_verification=uv,
             authenticator_attachment=AuthenticatorAttachment.CROSS_PLATFORM,
         )
-        make_credential_result = fido2_client.make_credential(create_options["publicKey"])
+
+        try:
+            make_credential_result = fido2_client.make_credential(create_options["publicKey"])
+        except Exception:
+            return False, "Client error or operation cancelled"
+
         touch.stop.emit()
         try:
             server.register_complete(state, make_credential_result)
-            cert = make_credential_result.response.attestation_object.att_stmt["x5c"]
+        except ValueError as e:
+            return False, str(e)
         except Exception:
-            return False
+            return False, "Bad signature"
+
+        if "x5c" not in make_credential_result.response.attestation_object.att_stmt:
+            return False, "Missing attestation certificate"
+
+        cert = make_credential_result.response.attestation_object.att_stmt["x5c"]
         cert_hash = sha256(cert[0]).digest().hex()
         expected_certs = Fido2Certs.get(self.data._device.fido2_certs, firmware_version)
         if expected_certs and cert_hash in expected_certs.hashes:
-            return True
+            return True, "Verification successful"
 
-        return False
+        if cert_hash in test_certs:
+            return False, "Nitrokey Test device"
+
+        return False, "Unexpected attestation certificate"
 
 
 class OverviewWorker(Worker):
     # TODO: remove DeviceData from signatures
     device_updated = Signal(UpdateResult)
-    genuine_device = Signal(bool)
+    genuine_device = Signal(bool, str)
 
-    def __init__(self, common_ui: CommonUi, app_widget: QWidget) -> None:
+    def __init__(self, common_ui: CommonUi) -> None:
         super().__init__(common_ui)
-        self.pin_cache = PinCache()
-        self.pin_ui = Fido2PinUi(app_widget)
 
     @Slot(DeviceData, bool)
     def update_device(self, data: DeviceData, is_qubesos: bool) -> None:
@@ -226,6 +187,6 @@ class OverviewWorker(Worker):
 
     @Slot(DeviceData)
     def check_genuine(self, data: DeviceData) -> None:
-        job = VerifyGenuine(self.common_ui, data, self.pin_cache, self.pin_ui)
+        job = VerifyGenuine(self.common_ui, data)
         job.is_genuine.connect(self.genuine_device)
         self.run(job)

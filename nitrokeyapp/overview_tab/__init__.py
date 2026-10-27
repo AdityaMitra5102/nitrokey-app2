@@ -27,7 +27,7 @@ class OverviewTab(QtUtilsMixIn, QWidget):
     trigger_update_file = Signal(DeviceData, str, bool)
     trigger_check_genuine = Signal(DeviceData)
 
-    def __init__(self, parent: QWidget) -> None:
+    def __init__(self, parent: QWidget | None = None) -> None:
         QWidget.__init__(self, parent)
         QtUtilsMixIn.__init__(self)
 
@@ -35,7 +35,7 @@ class OverviewTab(QtUtilsMixIn, QWidget):
         self.common_ui = CommonUi()
 
         self.worker_thread = QThread()
-        self._worker = OverviewWorker(self.common_ui, parent)
+        self._worker = OverviewWorker(self.common_ui)
         self._worker.moveToThread(self.worker_thread)
         self.worker_thread.start()
 
@@ -82,6 +82,9 @@ class OverviewTab(QtUtilsMixIn, QWidget):
         self.data = data
         self.ui.btn_check_genuine.setStyleSheet("")
         self.ui.btn_check_genuine.setText("Check for Authenticity")
+        self.ui.btn_check_genuine.setToolTip(
+            "Verify the authenticity of the device with attestation certificates"
+        )
 
         # catch too old firmware
         if data.is_too_old:
@@ -208,20 +211,26 @@ class OverviewTab(QtUtilsMixIn, QWidget):
         assert self.data
         self.trigger_check_genuine.emit(self.data)
 
-    @Slot(bool)
-    def genuine_result(self, result: bool) -> None:
+    @Slot(bool, str)
+    def genuine_result(self, result_val: bool, result_reason: str) -> None:
         result_button = self.ui.btn_check_genuine
-        if result:
+        if result_val:
             result_button.setText("Verified Genuine")
             result_button.setStyleSheet(
+                "QPushButton {"
                 "background-color: rgba(115, 215, 125, 0.18);"
                 "border: 1px solid rgba(115, 215, 125, 0.5);"
                 "border-radius: 6px; color: rgb(115, 215, 125); font-weight: 600;"
+                "}"
             )
         else:
             result_button.setText("Verification Failed")
             result_button.setStyleSheet(
+                "QPushButton {"
                 "background-color: rgba(192, 57, 43, 0.18);"
                 "border: 1px solid rgba(192, 57, 43, 0.5);"
                 "border-radius: 6px; color: #ff8070; font-weight: 600;"
+                "}"
             )
+
+        result_button.setToolTip(result_reason)
