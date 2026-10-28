@@ -12,7 +12,7 @@ from nitrokeyapp.common_ui import CommonUi
 from nitrokeyapp.device_data import DeviceData
 from nitrokeyapp.qt_utils_mix_in import QtUtilsMixIn
 from nitrokeyapp.update import UpdateResult, UpdateStatus
-from nitrokeyapp.utils import get_transport
+from nitrokeyapp.utils import get_transport, instantiate_device_on_new_channel_hid
 from nitrokeyapp.worker import Worker
 
 from .worker import OverviewWorker
@@ -128,6 +128,7 @@ class OverviewTab(QtUtilsMixIn, QWidget):
 
         transport = get_transport()
         if transport == Transport.CTAPHID:
+            self.data = instantiate_device_on_new_channel_hid(self.data)
             assert isinstance(self.data._device, TrussedDevice)
             assert isinstance(self.data._device.connection, CtapHidConnection)
             fido2_client = Fido2Client(
