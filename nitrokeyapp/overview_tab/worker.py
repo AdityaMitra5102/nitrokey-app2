@@ -111,10 +111,6 @@ class VerifyGenuine(Job):
                 client_data_collector=client_data_collector,
                 user_interaction=Interaction(),
             )
-            assert isinstance(fido2_client, Fido2Client)
-            if not (fido2_client._backend.info.options.get("makeCredUvNotRqd", False)):
-                return False, "Please update firmware to continue"
-
         else:
             fido2_client = WindowsClient(client_data_collector)
 
