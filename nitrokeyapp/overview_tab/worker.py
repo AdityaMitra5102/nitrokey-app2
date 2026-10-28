@@ -161,6 +161,7 @@ class VerifyGenuine(Job):
         if cert_hash in test_certs:
             return False, "Nitrokey Test device"
 
+        logger.warning(f"Unexpected cert hash {cert_hash}")
         return False, "Unexpected attestation certificate"
 
 

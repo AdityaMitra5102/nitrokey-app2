@@ -1,7 +1,9 @@
 import logging
 import shutil
 
-from nitrokey.trussed import Transport
+from fido2.client import DefaultClientDataCollector, Fido2Client
+from nitrokey.trussed import Transport, TrussedDevice, recommended_transport
+from nitrokey.trussed._connection.ctaphid import CtapHidConnection
 from nitrokey.trussed.admin_app import InitStatus
 from PySide6.QtCore import QThread, Signal, Slot
 from PySide6.QtWidgets import QFileDialog, QWidget
@@ -124,6 +126,24 @@ class OverviewTab(QtUtilsMixIn, QWidget):
                 self.ui.status_label.show()
                 self.ui.nk3_status.show()
 
+        transport = get_transport()
+        if transport == Transport.CTAPHID:
+            assert isinstance(self.data._device, TrussedDevice)
+            assert isinstance(self.data._device.connection, CtapHidConnection)
+            fido2_client = Fido2Client(
+                device=self.data._device.connection.device,
+                client_data_collector=DefaultClientDataCollector(origin="https://example.com"),
+            )
+            if not (fido2_client._backend.info.options.get("makeCredUvNotRqd", False)):
+                self.ui.btn_check_genuine().setEnabled(False)
+                self.ui.btn_check_genuine.setToolTip("Please update firmware to continue")
+
+        if (
+            transport == Transport.CCID and recommended_transport() != Transport.CCID
+        ):  # recommended_transport() checks whether its CCID because its on unpriviledged Windows. Checking for not CCID here means checking whether CCID is forced on other OS
+            self.ui.btn_check_genuine().setEnabled(False)
+            self.ui.btn_check_genuine.setToolTip("Unable to communicate for FIDO commands")
+
     def set_device_data(
         self, path: str, uuid: str, version: str, variant: str, init_status: str
     ) -> None:
@@ -223,6 +243,7 @@ class OverviewTab(QtUtilsMixIn, QWidget):
                 "border-radius: 6px; color: rgb(115, 215, 125); font-weight: 600;"
                 "}"
             )
+            logger.info("Authenticator verified")
         else:
             result_button.setText("Verification Failed")
             result_button.setStyleSheet(
@@ -232,5 +253,7 @@ class OverviewTab(QtUtilsMixIn, QWidget):
                 "border-radius: 6px; color: #ff8070; font-weight: 600;"
                 "}"
             )
+            logger.warning("Authenticator verification failed")
+            logger.warning(result_reason)
 
         result_button.setToolTip(result_reason)
